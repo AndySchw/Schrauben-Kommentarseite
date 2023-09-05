@@ -2,6 +2,7 @@ const express = require("express");
 const cors = require("cors");
 const multer = require("multer");
 const AWS = require('aws-sdk'); // Hinzufügen
+const fs = require('fs');
 
 const app = express();
 const port = 3000;
