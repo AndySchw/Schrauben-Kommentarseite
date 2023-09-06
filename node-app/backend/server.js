@@ -41,7 +41,7 @@ app.post("/", upload.single("avatar"), (request, response) => {
   const fileContent = fs.readFileSync(request.file.path);
 
   const params = {
-    Bucket: 'my-unique-bucket-name', // Ändern Sie dies zu Ihrem Bucket-Namen
+    Bucket: 'andyjfschraube24.de', // Ändern Sie dies zu Ihrem Bucket-Namen
     Key: `${Date.now()}-${request.file.originalname}`,
     Body: fileContent
   };
@@ -56,7 +56,7 @@ app.post("/", upload.single("avatar"), (request, response) => {
 
     // Formulardaten in DynamoDB speichern
     const formData = {
-      TableName: "ContactFormTable", // Ändern Sie dies zu Ihrem Tabellennamen
+      TableName: "terraform-locks", // Ändern Sie dies zu Ihrem Tabellennamen
       Item: {
         id: `${Date.now()}`,
         firstname: request.body.firstname,

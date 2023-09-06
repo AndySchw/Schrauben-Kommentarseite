@@ -8,6 +8,32 @@ resource "aws_vpc" "main" {
   cidr_block = "10.0.0.0/16"
 }
 
+####################### Variablen aus .env Datei einlesen ###############################################
+
+variable "oeffentlicher_key" {
+  description = "Der Name des SSH-Schlüssels für die EC2-Instanz öffenltich aus AWS"
+  type        = string
+}
+
+variable "privater_key" {
+  description = "Der Name des SSH-Schlüssels für die EC2-Instanz privat vom Lokalen PC"
+  type        = string
+}
+
+variable "s3_bucket_kundendaten" {
+  description = "Der Name des S3 Bucket auf dem die Kundenbiler gespeichert werden"
+  type        = string
+}
+
+variable "s3_bucket_zwischenspeicher" {
+  description = "Der Name des S3 Bucket zum erstellen der EC2 Maschienen"
+  type        = string
+}
+
+variable "dynamodb" {
+  description = "Der Name der DynamoDB"
+  type        = string
+}
 
 
 ####################### IGW ###############################################
@@ -46,7 +72,7 @@ resource "aws_subnet" "public2" {
 }
 
 resource "aws_route_table_association" "public_route_table_public1" {
-  subnet_id      = aws_subnet.public2.id
+  subnet_id      = aws_subnet.public1.id
   route_table_id = aws_route_table.public_route_table.id
 }
 
@@ -99,7 +125,7 @@ resource "aws_vpc_endpoint" "dynamodb_endpoint" {
 resource "aws_vpc_endpoint" "s3_endpoint1" {
   vpc_id       = aws_vpc.main.id
   service_name = "com.amazonaws.eu-central-1.s3"
-  route_table_ids = [aws_route_table.private_route_table.id]  # Verwenden Sie die Route-Tabelle des öffentlichen Subnets
+  route_table_ids = [aws_route_table.private_route_table.id]  # Verwenden Sie die Route-Tabelle des privaten Subnets
 }
 
 #routing endpunkte privat sub 2
@@ -121,7 +147,7 @@ resource "aws_vpc_endpoint" "dynamodb_endpoint2" {
 resource "aws_vpc_endpoint" "s3_endpoint2" {
   vpc_id       = aws_vpc.main.id
   service_name = "com.amazonaws.eu-central-1.s3"
-  route_table_ids = [aws_route_table.private_route_table2.id]  # Verwenden Sie die Route-Tabelle des öffentlichen Subnets
+  route_table_ids = [aws_route_table.private_route_table2.id]  # Verwenden Sie die Route-Tabelle des privaten Subnets
 }
 ####################### SG ###############################################
 
@@ -165,6 +191,12 @@ resource "aws_security_group" "ec2_sg_private1"{
     cidr_blocks = ["10.0.2.0/24"] # Nur für den öffentliches subnetz
   }
 
+  ingress {
+    from_port   = 3000
+    to_port     = 3000
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]  # Sie könnten dies auf die IP des ALB beschränken, um die Sicherheit zu erhöhen
+  }
 
   ingress {
     from_port   = 0
@@ -191,10 +223,12 @@ resource "aws_security_group" "ec2_sg_private1"{
 
 ####################### ALB ###############################################
 
+
 resource "aws_lb" "web" {
   name               = "web-alb"
   internal           = false
   load_balancer_type = "application"
+  security_groups    = [aws_security_group.allow_web.id]
   subnets            = [aws_subnet.public1.id, aws_subnet.public2.id]
 }
 
@@ -203,6 +237,16 @@ resource "aws_lb_target_group" "TG1" {
   port     = 3000
   protocol = "HTTP"
   vpc_id   = aws_vpc.main.id
+  
+
+  health_check {
+      path                = "/"  # Der Pfad zur Gesundheitsprüfung Ihrer Anwendung
+      protocol            = "HTTP"
+      port                = 3000  # Der Port Ihrer Anwendung auf den EC2-Instanzen
+      unhealthy_threshold = 2
+      healthy_threshold   = 2
+      timeout             = 3
+    }
 }
 
 resource "aws_lb_target_group" "TG2" {
@@ -210,22 +254,28 @@ resource "aws_lb_target_group" "TG2" {
   port     = 3000
   protocol = "HTTP"
   vpc_id   = aws_vpc.main.id
+
+  health_check {
+      path                = "/"  # Der Pfad zur Gesundheitsprüfung Ihrer Anwendung
+      protocol            = "HTTP"
+      port                = 3000  # Der Port Ihrer Anwendung auf den EC2-Instanzen
+      unhealthy_threshold = 2
+      healthy_threshold   = 2
+      timeout             = 3
+    }
 }
 
 
-# # ALB auf Ec2 1
-# resource "aws_lb_target_group_attachment" "TG1" {
-#   target_group_arn = aws_lb_target_group.TG1.arn
-#   target_id        = aws_autoscaling_group.web_asg.id
-#   port             = 80
-# }
+resource "aws_autoscaling_attachment" "asg_attachment_TG1" {
+  autoscaling_group_name = aws_autoscaling_group.web_asg.name
+  lb_target_group_arn   = aws_lb_target_group.TG1.arn
+}
 
-# # ALB auf Ec2 2
-# resource "aws_lb_target_group_attachment" "TG2" {
-#   target_group_arn = aws_lb_target_group.TG2.arn
-#   target_id        = aws_autoscaling_group.web_asg.id
-#   port             = 80
-# }
+resource "aws_autoscaling_attachment" "asg_attachment_TG2" {
+  autoscaling_group_name = aws_autoscaling_group.web_asg.name
+  lb_target_group_arn   = aws_lb_target_group.TG2.arn
+}
+
 
 
 resource "aws_lb_listener" "web" {
@@ -257,7 +307,7 @@ resource "aws_lb_listener" "web" {
 ####################### DynamoDB ###############################################
 
 resource "aws_dynamodb_table" "terraform_locks" {
-  name           = "terraform-locks"
+  name           = var.dynamodb
   billing_mode   = "PAY_PER_REQUEST"
 
   attribute {
@@ -271,8 +321,9 @@ resource "aws_dynamodb_table" "terraform_locks" {
 ####################### S3 ###############################################
 
 resource "aws_s3_bucket" "terraform_state_bucket" {
-  bucket = "jfschraube24.de"
+  bucket = var.s3_bucket_kundendaten
   acl    = "private"
+  force_destroy = true
 
   server_side_encryption_configuration {
     rule {
@@ -290,8 +341,9 @@ resource "aws_s3_bucket" "terraform_state_bucket" {
 # neuer bucket für js daten
 
 resource "aws_s3_bucket" "jsdatenbucket" {
-  bucket = "jsdatenbucket"  # Ersetzen Sie durch Ihren gewünschten Bucket-Namen
+  bucket = var.s3_bucket_zwischenspeicher  # Ersetzen Sie durch Ihren gewünschten Bucket-Namen
   acl    = "private"
+  force_destroy = true
 
   server_side_encryption_configuration {
     rule {
@@ -343,20 +395,13 @@ resource "aws_iam_policy" "s3_access" {
     Version = "2012-10-17",
     Statement = [
       {
-        Action   = ["s3:ListBucket"],
+        Action   = "s3:*",
         Effect   = "Allow",
-        Resource = ["arn:aws:s3:::jfschraube24.de"]
-      },
-      {
-        Action   = ["s3:GetObject", "s3:PutObject"],
-        Effect   = "Allow",
-        Resource = ["arn:aws:s3:::jfschraube24.de/*"]
+        Resource = "*",
       }
     ]
   })
 }
-
-###### IAM-Policy, die DynamoDB-Zugriffsberechtigungen gewährt:
 
 resource "aws_iam_policy" "dynamodb_access" {
   name        = "dynamodb_access"
@@ -366,20 +411,14 @@ resource "aws_iam_policy" "dynamodb_access" {
     Version = "2012-10-17",
     Statement = [
       {
-        Action   = [
-          "dynamodb:PutItem",
-          "dynamodb:GetItem",
-          "dynamodb:UpdateItem",
-          "dynamodb:Query",
-          "dynamodb:Scan",
-          "dynamodb:ListTables"
-        ],
+        Action   = "dynamodb:*",
         Effect   = "Allow",
-        Resource = ["arn:aws:dynamodb:*:*:table/terraform-locks"]
+        Resource = "*"
       }
     ]
   })
 }
+
 
 resource "aws_iam_role_policy_attachment" "s3_access_attachment" {
   role       = aws_iam_role.ec2_role.name
@@ -471,17 +510,12 @@ resource "aws_launch_template" "private_web_1" {
   name          = "private_web_1"
   image_id      = "ami-0766f68f0b06ab145" 
   instance_type = "t2.micro"
-  key_name      = "provisioners_key"
+  key_name      = var.oeffentlicher_key
 
   network_interfaces {
     subnet_id              = aws_subnet.private1.id
     security_groups        = [aws_security_group.ec2_sg_private1.id]
   }
-
-  # network_interfaces {
-  #   network_interface_id = aws_network_interface.example.id
-  #   device_index         = 0
-  # }
 
   iam_instance_profile {
     name = aws_iam_instance_profile.ec2_profile.name
@@ -489,20 +523,18 @@ resource "aws_launch_template" "private_web_1" {
 
   user_data = base64encode(<<-EOF
 #!/bin/bash
-sudo yum install -y nodejs
-sudo npm install -g pm2
-sudo yum install -y awscli
-mkdir -p /home/ec2-user/app
-cd /home/ec2-user/app
+sudo yum install -y nodejs 
+mkdir -p /home/ec2-user/app 
+cd /home/ec2-user/app 
 
 
-aws s3 sync s3://jsdatenbucket/ /home/ec2-user/app
-tar -xvf node-app.tar
+sudo aws s3 sync s3://${var.s3_bucket_zwischenspeicher}/ /home/ec2-user/app 
+sudo chmod 777 node-app.tar
+sudo tar -xvf node-app.tar 
 
-cd node-app/backend
-sudo npm install
-sudo chmod +x server.js
-pm2 start server.js --name backend
+cd node-app/backend 
+sudo chmod +x server.js 
+sudo node server.js
 EOF
   )
 
@@ -519,7 +551,7 @@ resource "aws_launch_template" "private_web_2" {
   name          = "private_web_2"
   image_id      = "ami-0766f68f0b06ab145" 
   instance_type = "t2.micro"
-  key_name      = "provisioners_key"
+  key_name      = var.oeffentlicher_key
 
   network_interfaces {
     subnet_id              = aws_subnet.private2.id
@@ -537,18 +569,18 @@ resource "aws_launch_template" "private_web_2" {
 
   user_data = base64encode(<<-EOF
 #!/bin/bash
-sudo yum install -y nodejs
-sudo npm install -g pm2
-sudo yum install -y awscli
-mkdir -p /home/ec2-user/app
-cd /home/ec2-user/app
+sudo yum install -y nodejs 
+mkdir -p /home/ec2-user/app 
+cd /home/ec2-user/app 
 
-aws s3 sync /home/ec2-user/app s3://jsdatenbucket/./
-cd node-app/backend
 
-sudo npm install
-sudo chmod +x server.js
-pm2 start server.js --name backend
+sudo aws s3 sync s3://${var.s3_bucket_zwischenspeicher}/ /home/ec2-user/app 
+sudo chmod 777 node-app.tar
+sudo tar -xvf node-app.tar 
+
+cd node-app/backend 
+sudo chmod +x server.js 
+sudo node server.js 
 EOF
   )
 
@@ -559,127 +591,3 @@ EOF
     }
   }
 }
-
-
-
-
-
-
-
-
-
-
-
-################################################################################################
-################################################################################################
-################################################################################################
-################################################################################################
-
-
-# ############################ EC2 1 ################################################
-
-
-# # Erstellt eine öffentliche EC2-Instanz im öffentlichen Subnetz
-# resource "aws_instance" "private_web_1" {
-#   ami           = "ami-0766f68f0b06ab145" # Beispiel-AMI-ID. Ersetzen Sie dies durch die gewünschte AMI-ID.
-#   instance_type = "t2.micro"
-#   subnet_id     = aws_subnet.private1.id
-#   vpc_security_group_ids = [aws_security_group.ec2_sg_privat1.id] # für instance
-#   iam_instance_profile = aws_iam_instance_profile.ec2_profile.name
-  
-#   key_name = "provisioners_key"   # !!!!!!!!!!!!!!Key public anpassen
-
-#    connection {
-#     type     = "ssh"
-#     user     = "ec2-user"
-#     private_key = file("C:/Users/andye/Documents/AWS/AndysTestServer/provisioners_key.pem") # !!!!!!!!!!!!!!!!!!Key Privat anpassen
-#     host     = self.public_ip
-#   }
-# # ausgefürte Befehle die auf der Maschiene laufen
-#   provisioner "remote-exec" {
-#     inline = [
-#       "sudo yum install -y nodejs",
-#       "sudo npm install pm2 -g",
-
-#     ]
-#   }
-# # Ordner erstellen
-#   provisioner "remote-exec" {
-#     inline = ["mkdir -p /home/ec2-user/app"]
-#   }
-
-# # Local ausgefürt, schreibt ausgewählte datei oder Verzeichnis in die EC2
-#   provisioner "file" {
-#     source      = "./node-app/" # !!!!!!!!!!!!!!!!!!!!!!!!!!!!Path anpassen
-#     destination = "/home/ec2-user/app/" # !!!!!!!!!!!!!!!!!!!!!!!!!!!!Path anpassen
-#   }
-
-  
-
-#   # node ausführen nachdem das Verzeichnis kopiert ist backend
-#   provisioner "remote-exec" {
-#     inline = [
-#       "sudo chmod +x /home/ec2-user/app/node-app/backend/server.js",
-#       "cd /home/ec2-user/app/backend/",
-#       # "sudo npm init -y",
-#       "sudo npm install -y",
-#       # "nohup node server.js > /dev/null 2>&1 &",
-#       "pm2 start server.js --name backend",
-#       # "npm start",
-#     ]
-#   }
-# }
-
-# ############################ EC2 2 ################################################
-
-
-# # Erstellt eine öffentliche EC2-Instanz im öffentlichen Subnetz
-# resource "aws_instance" "private_web_2" {
-#   ami           = "ami-0766f68f0b06ab145" # Beispiel-AMI-ID. Ersetzen Sie dies durch die gewünschte AMI-ID.
-#   instance_type = "t2.micro"
-#   subnet_id     = aws_subnet.private2.id
-#   vpc_security_group_ids = [aws_security_group.ec2_sg_privat1.id] # für instance
-#   iam_instance_profile = aws_iam_instance_profile.ec2_profile.name
-  
-#   key_name = "provisioners_key"   # !!!!!!!!!!!!!!Key public anpassen
-
-#    connection {
-#     type     = "ssh"
-#     user     = "ec2-user"
-#     private_key = file("C:/Users/andye/Documents/AWS/AndysTestServer/provisioners_key.pem") # !!!!!!!!!!!!!!!!!!Key Privat anpassen
-#     host     = self.public_ip
-#   }
-# # ausgefürte Befehle die auf der Maschiene laufen
-#   provisioner "remote-exec" {
-#     inline = [
-#       "sudo yum install -y nodejs",
-#       "sudo npm install pm2 -g",
-#     ]
-#   }
-# # Ordner erstellen
-#   provisioner "remote-exec" {
-#     inline = ["mkdir -p /home/ec2-user/app"]
-#   }
-
-# # Local ausgefürt, schreibt ausgewählte datei oder Verzeichnis in die EC2
-#   provisioner "file" {
-#     source      = "./node-app/" # !!!!!!!!!!!!!!!!!!!!!!!!!!!!Path anpassen
-#     destination = "/home/ec2-user/app/" # !!!!!!!!!!!!!!!!!!!!!!!!!!!!Path anpassen
-#   }
-
-  
-
-#   # node ausführen nachdem das Verzeichnis kopiert ist backend
-#   provisioner "remote-exec" {
-#     inline = [
-#       "sudo chmod +x /home/ec2-user/app/node-app/backend/server.js",
-#       "cd /home/ec2-user/app/backend/",
-#       # "sudo npm init -y",
-#       "sudo npm install -y",
-#       # "nohup node server.js > /dev/null 2>&1 &",
-#       "pm2 start server.js --name backend",
-#       # "npm start",
-#     ]
-#   }
-# }
-
