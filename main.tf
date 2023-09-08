@@ -149,6 +149,8 @@ resource "aws_vpc_endpoint" "s3_endpoint2" {
   service_name = "com.amazonaws.eu-central-1.s3"
   route_table_ids = [aws_route_table.private_route_table2.id]  # Verwenden Sie die Route-Tabelle des privaten Subnets
 }
+
+
 ####################### SG ###############################################
 
 resource "aws_security_group" "allow_web" {
@@ -304,6 +306,11 @@ resource "aws_lb_listener" "web" {
   }
 }
 
+
+output "alb_dns_name" {
+  value = aws_lb.web.dns_name
+}
+
 ####################### DynamoDB ###############################################
 
 resource "aws_dynamodb_table" "terraform_locks" {
@@ -311,11 +318,11 @@ resource "aws_dynamodb_table" "terraform_locks" {
   billing_mode   = "PAY_PER_REQUEST"
 
   attribute {
-    name = "LockID"
+    name = "id"
     type = "S"
   }
 
- hash_key        ="LockID"
+  hash_key        = "id"
 }
 
 ####################### S3 ###############################################
@@ -534,7 +541,7 @@ sudo tar -xvf node-app.tar
 
 cd node-app/backend 
 sudo chmod +x server.js 
-sudo node server.js
+sudo node server.js > server.log 2>&1
 EOF
   )
 
@@ -580,7 +587,7 @@ sudo tar -xvf node-app.tar
 
 cd node-app/backend 
 sudo chmod +x server.js 
-sudo node server.js 
+sudo node server.js > server.log 2>&1
 EOF
   )
 

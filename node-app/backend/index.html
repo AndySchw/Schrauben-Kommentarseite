@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+    body {
+        font-family: Arial, sans-serif;
+        background-color: #f0f0f0;
+        color: #333;
+        margin: 0;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+        padding: 5px;
+    }
+    .container {
+        max-width: 500px;
+        width: 100%;
+        margin: 0 auto;
+        padding: 20px;
+        background-color: #fff;
+        border-radius: 8px;
+        box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        box-sizing: border-box;
+        
+    }
+    .form-group {
+        margin-bottom: 15px;
+    }
+    .form-group label {
+        display: block;
+        margin-bottom: 5px;
+    }
+    .form-group input, .form-group textarea, .form-group button {
+        width: 95%;
+        padding: 10px;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+    }
+    .form-group input[type="file"] {
+        padding: 3px;
+    }
+    .form-group img {
+        display: block;
+        margin: 10px auto;
+        max-width: 250px;
+        border-radius: 4px;
+    }
+    .form-group button {
+        background-color: #28a745;
+        color: #fff;
+        border: none;
+        cursor: pointer;
+    }
+    .form-group button:hover {
+        background-color: #218838;
+    }
+</style>
+</head>
+<body>
+
+<div class="container">
+    <form id="formular" method="POST" enctype="multipart/form-data">
+        <div class="form-group">
+            <label for="vorname">Vorname</label>
+            <input type="text" id="vorname" name="vorname">
+        </div>
+        <div class="form-group">
+            <label for="nachname">Nachname</label>
+            <input type="text" id="nachname" name="nachname">
+        </div>
+        <div class="form-group">
+            <label for="email">Email</label>
+            <input type="email" id="email" name="email">
+        </div>
+        <div class="form-group">
+            <label for="kommentar">Kommentar</label>
+            <textarea id="kommentar" name="kommentar"></textarea>
+        </div>
+        <div class="form-group">
+            <label for="bild">Bild hochladen</label>
+            <input type="file" id="bild" name="bild" accept="image/*">
+            <img id="bildVorschau" src="" alt="Bild Vorschau" style="display: none;">
+        </div>
+        <div class="form-group">
+            <button type="submit">Absenden</button>
+        </div>
+    </form>
+</div>
+
+<script>
+     function bildVorschau(event) {
+        var reader = new FileReader();
+        reader.onload = function(){
+            var output = document.getElementById('bildVorschau');
+            output.src = reader.result;
+            output.style.display = 'block';
+        };
+        reader.readAsDataURL(event.target.files[0]);
+    }
+
+    document.getElementById('bild').addEventListener('change', bildVorschau);
+
+    document.getElementById('formular').addEventListener('submit', function(event) {
+        event.preventDefault();
+
+        var formData = new FormData(this);
+
+        fetch('http://localhost:3000/submit', {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                alert(data.message);
+                document.getElementById('formular').reset();
+                document.getElementById('bildVorschau').style.display = 'none'; // Bildvorschau zurücksetzen
+            } else {
+                alert('Error: ' + data.message);
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Ein Fehler ist aufgetreten beim Absenden des Formulars.');
+        });
+    });
+</script>
+
+</body>
+</html>

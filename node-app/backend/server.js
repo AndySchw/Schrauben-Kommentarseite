@@ -1,82 +1,113 @@
-const express = require("express");
-const cors = require("cors");
-const multer = require("multer");
-const AWS = require('aws-sdk'); // Hinzufügen
-const fs = require('fs');
+const express = require('express');
+const AWS = require('aws-sdk'),
+      {
+        DynamoDBDocument
+      } = require("@aws-sdk/lib-dynamodb"),
+      {
+        DynamoDB
+      } = require("@aws-sdk/client-dynamodb"),
+      {
+        Upload
+      } = require("@aws-sdk/lib-storage"),
+      {
+        S3
+      } = require("@aws-sdk/client-s3");
+const bodyParser = require('body-parser');
+const fileUpload = require('express-fileupload');
+const path = require('path');
+const { v4: uuidv4 } = require('uuid');
+const cors = require('cors');
 
 const app = express();
-const port = 3000;
 
-app.use(express.static('../frontend'));
+app.use(cors());
 
-const corsOptions = {
-  origin: "http://localhost:3000",
-};
 
-app.use(cors(corsOptions));
+// // Importiere Terraform-Ausgabevariablen
+// const allowedOrigins = [process.env.ALLOWED_ORIGIN]; // Du kannst die Umgebungsvariable ALLOWED_ORIGIN in deinem System festlegen.
+
+// app.use(function(req, res, next) {
+//   const origin = req.headers.origin;
+//   if (allowedOrigins.includes(origin)) {
+//     res.header("Access-Control-Allow-Origin", origin);
+//   }
+//   res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
+
+
 
 // AWS SDK Konfiguration
 AWS.config.update({
-  region: "eu-central-1", // Ändern Sie dies nach Bedarf
+  accessKeyId: '*',
+  secretAccessKey: '*',
+  sessionToken: '*',
+  region: 'eu-central-1'
 });
 
-const s3 = new AWS.S3();
-const dynamoDb = new AWS.DynamoDB.DocumentClient();
+const dynamodb = DynamoDBDocument.from(new DynamoDB());
+const s3 = new S3();
 
-// multer-Konfiguration
-const storage = multer.diskStorage({
-  destination: "./images/",
-  filename: function (request, file, callback) {
-    callback(null, Date.now() + "-" + file.originalname);
-  },
+app.use(bodyParser.urlencoded({ extended: false }));
+app.use(fileUpload());
+
+// Route um die Frontend-Datei zu servieren
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-const upload = multer({ storage: storage });
+// Route um Formulardaten zu empfangen und in DynamoDB und S3 zu speichern
+app.post('/submit', async (req, res) => {
+  const { vorname, nachname, email, kommentar } = req.body;
+  const file = req.files.bild;
+  const currentDate = new Date().toISOString();
+  const fileName = `${vorname}_${currentDate}.jpg`;
 
-// Route zum Hochladen von Bildern in S3 und Speichern von Formulardaten in DynamoDB
-app.post("/", upload.single("avatar"), (request, response) => {
-  console.log(request.body, request.file);
+ 
+    // Bild in S3 speichern
+    const s3Params = {
+      Bucket: 'andykundendaten',
+      Key: fileName,
+      Body: file.data,
+      // ACL: 'public-read'
+    };
 
-  // Bild zu S3 hochladen
-  const fileContent = fs.readFileSync(request.file.path);
+    await new Upload({
+      client: s3,
+      params: s3Params
+    }).done();
 
-  const params = {
-    Bucket: 'andyjfschraube24.de', // Ändern Sie dies zu Ihrem Bucket-Namen
-    Key: `${Date.now()}-${request.file.originalname}`,
-    Body: fileContent
-  };
+    // Generieren Sie die S3-URL für das hochgeladene Bild
+    const s3Url = `https://${s3Params.Bucket}.s3.${AWS.config.region}.amazonaws.com/${encodeURIComponent(s3Params.Key)}`;
 
-  s3.upload(params, function(err, data) {
-    if (err) {
-      console.error("Fehler beim Hochladen des Bildes:", err);
-      return response.status(500).send("Fehler beim Hochladen des Bildes.");
-    }
-
-    console.log(`Bild erfolgreich hochgeladen. ${data.Location}`);
-
-    // Formulardaten in DynamoDB speichern
-    const formData = {
-      TableName: "terraform-locks", // Ändern Sie dies zu Ihrem Tabellennamen
+    // Daten in DynamoDB speichern
+    const params = {
+      TableName: 'kundendaten',
       Item: {
-        id: `${Date.now()}`,
-        firstname: request.body.firstname,
-        lastname: request.body.lastname,
-        email: request.body.email,
-        avatar: data.Location,
-        spam: request.body.spam === "on"
+        id: uuidv4(),
+        vorname,
+        nachname,
+        email,
+        kommentar,
+        datum: currentDate,
+        bildUrl: s3Url  // Speichern Sie die S3-URL als Bild-URL in DynamoDB
       }
     };
 
-    dynamoDb.put(formData, function(err, data) {
-      if (err) {
-        console.error("Fehler beim Speichern der Daten:", err);
-        return response.status(500).send("Fehler beim Speichern der Daten.");
-      }
+    await dynamodb.put(params, function(err,data){
 
-      console.log("Formulardaten erfolgreich gespeichert:", data);
-      response.json("Vielen Dank!");
+      if(err){
+        console.log("err",err);
+        }
+      else{
+        console.log("data",data)
+        }
     });
-  });
+
+    res.json({ success: true, message: 'Form submitted successfully' });
+
 });
 
-app.listen(port, () => console.info(`Server läuft auf http://localhost:${port}`));
+app.listen(3000, () => {
+  console.log('Server is running on http://localhost:3000');
+});
+
+module.exports = app;
