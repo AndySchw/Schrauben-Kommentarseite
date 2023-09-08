@@ -38,12 +38,10 @@ Azure, als Teil von Microsoft, genießt einen soliden Ruf für Zuverlässigkeit,
 # 5. Welche Unternehmen nutzen diesen Provider an?
 
 1. Starbucks
-2. ASOS
-3. Samsung
-4. BMW
-5. Johnson Controls
-6. Coca-Cola
-7. Ford
+2. Samsung
+3. BMW
+4. Coca-Cola
+5. Ford
 
 ------------------------------------------------------------------------------------------------
 # 6. Welche speziellen Dienste oder Technologien bietet der Anbieter an?
